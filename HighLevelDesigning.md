@@ -339,3 +339,21 @@ Depending on your system’s requirements:
 ## Conclusion
 
 You can’t have **Consistency**, **Availability**, and **Partition Tolerance** all at the same time in a distributed system. You must **choose two**, depending on your business needs. Understanding this trade-off helps in designing scalable, fault-tolerant systems.
+
+# Consistency
+
+When more than one clients requests the system, for all such requests it will be called **Consistent**, when each client gets the same data. The data should always be consistent, regardless of who is accessing it.
+
+When more than one client request the system, for all such requests, when different client get different response due to some recent update that has not been committed to all system yet, this reading operation will be called **Dirty Read**.
+
+## Factors to improve consistency
+
+- imporving network speed (bandwidth).
+- Stop the reads until all nodes are updated.
+- Replication based on distance aware strategies.
+
+### Types
+
+- **Strong** -: When the system does not allow read operations until all the nodes with replicated data are updated.
+- **Eventual** -: User reads requests are not halted till all the replicas are update rather the update process is eventual. Some users might recieve old data but eventually all the data is updated to the latest data.
+- **Weak** -: Not necessary that all nodes gets sync. Depends on the business logic.

@@ -922,3 +922,109 @@ The goal is to ensure that the same data exists across multiple database instanc
 | Master-Slave     | Only Master   | Yes              | Not Required      | General-purpose applications |
 | Read Replicas    | Only Master   | Yes              | Not Required      | Read-heavy workloads         |
 | Multi-Master     | All Nodes     | Yes              | Required          | Distributed systems          |
+
+---
+
+## Cache
+
+Caching is a process of storing frequently accessed data in a fast-access layer (_like memory_), so that future requests for that data can be server faster.
+
+- It is temporary storage.
+- It stores the frequently accessed data and results of expenses responses.
+
+## Redis Basics
+
+### What is Redis?
+
+**Redis** (REmote DIctionary Server) is an open-source, in-memory data structure store used as a **cache**, **database**, and **message broker**.
+
+### Key Features
+
+- In-memory key-value store
+- Extremely fast read and write operations
+- Rich data structures: strings, hashes, lists, sets, sorted sets, bitmaps, hyperloglogs
+- Supports persistence using RDB snapshots and AOF logs
+- Built-in replication and pub/sub capabilities
+- Key-level TTL (Time-To-Live) support
+
+### Common Use Cases
+
+- Caching expensive database queries
+- Storing web sessions
+- Leaderboards and counters
+- Rate limiting
+- Message queues and pub/sub systems
+
+### Common Redis Commands
+
+```bash
+SET key value            # Set a key
+GET key                  # Get the value of a key
+DEL key                  # Delete a key
+EXPIRE key 60            # Set expiration of 60 seconds
+TTL key                  # Get remaining TTL of a key
+INCR key                 # Increment a counter
+LPUSH list value         # Push to a list (left side)
+SADD set value           # Add to a set
+```
+
+## Caching Strategies: TTL, LRU
+
+### TTL (Time-To-Live)
+
+Sets an expiration time on cache entries.
+Useful for data that becomes stale over time (e.g., weather data, session tokens).
+Redis allows setting TTL using EXPIRE or directly via SET key value EX seconds.
+
+#### Pros:
+
+Auto-expiry prevents stale data.
+Helps manage memory usage.
+
+#### Cons:
+
+Requires good judgment on TTL duration.
+Expired cache can cause temporary performance drop due to cache miss.
+
+### LRU (Least Recently Used)
+
+Automatically evicts the least recently used keys when memory is full.
+Redis supports this through configuration:
+
+```bash
+  maxmemory 100mb
+  maxmemory-policy allkeys-lru
+```
+
+#### Pros:
+
+Keeps hot/frequent data in cache.
+Fully automatic eviction.
+
+#### Cons:
+
+Some rarely used but important data may be evicted.
+Not deterministic — eviction depends on access patterns.
+
+### CDN (Content Delivery Network)
+
+A CDN is a geographically distributed network of proxy servers and data centers that deliver static content (like images, JS/CSS, videos) to users based on their location.
+
+#### How It Works
+
+User requests go to the nearest CDN edge node.
+If content is cached there, it’s served directly.
+If not, the edge node fetches it from the origin server, caches it, and serves it.
+
+#### Benefits
+
+Reduces latency (delivers from edge)
+Offloads traffic from origin servers
+Improves reliability and fault tolerance
+Helps absorb large traffic spikes (e.g., DDoS mitigation)
+
+**Common CDNs**
+
+- Cloudflare, Akamai, Amazon CloudFront, Fastly, Google Cloud CDN
+
+---

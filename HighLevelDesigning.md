@@ -357,3 +357,347 @@ When more than one client request the system, for all such requests, when differ
 - **Strong** -: When the system does not allow read operations until all the nodes with replicated data are updated.
 - **Eventual** -: User reads requests are not halted till all the replicas are update rather the update process is eventual. Some users might recieve old data but eventually all the data is updated to the latest data.
 - **Weak** -: Not necessary that all nodes gets sync. Depends on the business logic.
+
+# Load Balancer
+
+A load balancer is a service that distributed incoming traffic accross multiple backend servers to ensure -:
+
+- No single server is overwhelmed.
+- High availability.
+- Better performance & fault tolerance.
+
+## Types
+
+### Layer 4 (**Transport Layer**)
+
+- Works at TCP/UDP level.
+- Rates based on IP address + port.
+- Faster but limited intelligence [AWS NLB]
+
+### Layer 7 (**Application Layer**)
+
+- Understands http/https
+- Routes based on urls, headers, cookies.
+- AWS application Load Balancer, NGINX, HAProxy.
+
+## Features
+
+- Only routes to healthy server.
+- Route some user to same backend (if needed)
+- Redirects traffic if servers fails.
+
+# Rate Limiter
+
+A rate limiter is used to control the rate of traffic sent by a client or service.
+
+## In HTTP Context
+
+It limits the number of requests a client is allowed to send over a specified time period.
+
+```js
+if (count of requests > threshold) {
+  "Access blocked"
+}
+```
+
+### Examples
+
+- No more than 2 POST requests per second
+- Maximum 10 account creations per day from a single IP
+
+## Benefits
+
+- Prevents abuse and denial-of-service attacks
+- Filters out accidental or automated excess requests
+- Reduces infrastructure cost by limiting unnecessary load
+- Prevents server overloading
+- Enforces fair usage across clients
+
+---
+
+## Rate Limiting Algorithms
+
+### Fixed Window Counter
+
+- Divides time into fixed-size windows (e.g., 1 minute)
+- Count requests per client per window
+- If count exceeds the limit, block further requests
+
+#### Problem
+
+Can be bypassed at the boundary of two windows. A client can send double the limit if requests are made at the end of one window and the start of the next.
+
+```js
+const rateLimitMap = new Map();
+const WINDOW_SIZE_IN_MS = 10000; // 10 seconds
+const MAX_REQUESTS = 5;
+
+function fixedWindowRateLimiter(req, res, next) {
+  const key = req.ip;
+  const now = Date.now();
+
+  if (!rateLimitMap.has(key)) {
+    rateLimitMap.set(key, { count: 1, startTime: now });
+    return next();
+  }
+
+  const { count, startTime } = rateLimitMap.get(key);
+  if (now - startTime < WINDOW_SIZE_IN_MS) {
+    if (count < MAX_REQUESTS) {
+      rateLimitMap.set(key, { count: count + 1, startTime });
+      return next();
+    } else {
+      return res.status(429).send("Rate limit exceeded");
+    }
+  } else {
+    rateLimitMap.set(key, { count: 1, startTime: now });
+    return next();
+  }
+}
+```
+
+---
+
+### Sliding Window Log
+
+- Stores the timestamp of every request
+- On each request:
+  - Remove old timestamps beyond the window
+  - Count remaining timestamps
+  - Block if count exceeds the limit
+
+#### Problem
+
+Consumes more memory since each request is tracked individually.
+
+```js
+const requestLogs = new Map();
+const WINDOW_SIZE_IN_MS = 10000;
+const MAX_REQUESTS = 5;
+
+function slidingWindowLogRateLimiter(req, res, next) {
+  const key = req.ip;
+  const now = Date.now();
+
+  if (!requestLogs.has(key)) {
+    requestLogs.set(key, []);
+  }
+
+  const timestamps = requestLogs
+    .get(key)
+    .filter((ts) => now - ts < WINDOW_SIZE_IN_MS);
+
+  if (timestamps.length < MAX_REQUESTS) {
+    timestamps.push(now);
+    requestLogs.set(key, timestamps);
+    return next();
+  } else {
+    return res.status(429).send("Rate limit exceeded");
+  }
+}
+```
+
+---
+
+### Sliding Window Counter
+
+- Time window is divided into smaller sub-windows (e.g., 60 seconds into 6 sub-windows of 10 seconds)
+- Stores only the request count per sub-window
+- On each request:
+  - Remove expired sub-windows
+  - Sum all valid counts
+  - Allow or block based on the sum
+
+#### How It Works:
+
+- Define a fixed time window, say 60 seconds (1 minute).
+- Split it into N sub-windows, e.g., 6 sub-windows of 10 seconds each.
+- For every request:
+  Update the count in the current sub-window.
+  Remove expired sub-windows (older than 1 minute).
+  Sum all counts from valid sub-windows.
+  If total > limit → block the request.
+
+- Result: Smoother, more fair rate limiting without boundary problems.
+
+#### Example
+
+```js
+  Window = 60 seconds
+  Sub-window = 10 seconds
+  Max Requests = 100
+
+  Let’s say the current time is 12:00:35.
+  Your stored sub-windows:
+  [
+  { timestamp: 12:00:05, count: 10 },
+  { timestamp: 12:00:15, count: 30 },
+  { timestamp: 12:00:25, count: 25 },
+  { timestamp: 12:00:35, count: 20 }
+  ]
+  Total requests in last 60 seconds: 10 + 30 + 25 + 20 = 85
+
+  If a new request comes in:
+
+  Add it to the current sub-window (12:00:35)
+
+  New total = 86 -> Allowed
+
+  If total > 100 -> Block
+```
+
+#### Problem
+
+Less precise than full log but much more memory efficient.
+
+```js
+const subWindows = new Map();
+const WINDOW_SIZE = 60000; // 1 minute
+const SUB_WINDOW_SIZE = 10000; // 10 seconds
+const MAX_REQUESTS = 10;
+
+function slidingWindowCounterRateLimiter(req, res, next) {
+  const key = req.ip;
+  const now = Date.now();
+
+  if (!subWindows.has(key)) {
+    subWindows.set(key, []);
+  }
+
+  let buckets = subWindows
+    .get(key)
+    .filter((b) => now - b.timestamp < WINDOW_SIZE);
+  const lastBucket = buckets[buckets.length - 1];
+
+  if (lastBucket && now - lastBucket.timestamp < SUB_WINDOW_SIZE) {
+    lastBucket.count += 1;
+  } else {
+    buckets.push({ timestamp: now, count: 1 });
+  }
+
+  const total = buckets.reduce((sum, b) => sum + b.count, 0);
+  subWindows.set(key, buckets);
+
+  if (total > MAX_REQUESTS) {
+    return res.status(429).send("Rate limit exceeded");
+  }
+
+  return next();
+}
+```
+
+#### Real-World Use:
+
+Often used in APIs, backend services, or custom Redis-based rate limiting systems where you want more fair usage across time without storing every single request.
+
+---
+
+### Token Bucket
+
+- A token bucket holds tokens and refills at a fixed rate
+- Each request consumes one token
+- If tokens are available, the request is allowed
+- If not, the request is blocked
+
+#### Advantage
+
+Allows short bursts of traffic but enforces rate over time meaning that server did not recieved any requests for 1 mins so a lot of token was available in the bucket so after the 5th minute server started recieving reqests so as multiple requests will hits the server and it has to process all but if less taken is available then that's fine.
+
+```js
+const tokenBuckets = new Map();
+const MAX_TOKENS = 10;
+const REFILL_RATE = 1; // 1 token every 100ms
+const REFILL_INTERVAL = 100;
+
+function tokenBucketRateLimiter(req, res, next) {
+  const key = req.ip;
+  const now = Date.now();
+
+  if (!tokenBuckets.has(key)) {
+    tokenBuckets.set(key, { tokens: MAX_TOKENS, lastRefill: now });
+  }
+
+  const bucket = tokenBuckets.get(key);
+  const elapsed = now - bucket.lastRefill;
+  const refill = Math.floor(elapsed / REFILL_INTERVAL) * REFILL_RATE;
+
+  bucket.tokens = Math.min(MAX_TOKENS, bucket.tokens + refill);
+  bucket.lastRefill = now;
+
+  if (bucket.tokens > 0) {
+    bucket.tokens -= 1;
+    return next();
+  } else {
+    return res.status(429).send("Rate limit exceeded");
+  }
+}
+```
+
+---
+
+### Leaky Bucket
+
+- Requests enter a queue (bucket)
+- The queue is processed at a fixed rate (leaks)
+- If the bucket is full, new requests are dropped
+
+#### Advantage
+
+Ensures a consistent rate of processing regardless of request burst
+
+```js
+const leakyBuckets = new Map();
+const MAX_QUEUE_SIZE = 10;
+const LEAK_INTERVAL = 100; // one request per 100ms
+
+function initLeakyBucketCleaner(key) {
+  const queue = leakyBuckets.get(key);
+  if (!queue._cleanerStarted) {
+    queue._cleanerStarted = true;
+    setInterval(() => {
+      if (queue.length > 0) queue.shift();
+    }, LEAK_INTERVAL);
+  }
+}
+
+function leakyBucketRateLimiter(req, res, next) {
+  const key = req.ip;
+  if (!leakyBuckets.has(key)) {
+    const queue = [];
+    queue._cleanerStarted = false;
+    leakyBuckets.set(key, queue);
+    initLeakyBucketCleaner(key);
+  }
+
+  const queue = leakyBuckets.get(key);
+
+  if (queue.length >= MAX_QUEUE_SIZE) {
+    return res.status(429).send("Rate limit exceeded");
+  }
+
+  queue.push(Date.now());
+  return next();
+}
+```
+
+---
+
+## Algorithm Comparison
+
+| Algorithm              | Burst Support | Accuracy | Memory Use | Use Case                   |
+| ---------------------- | ------------- | -------- | ---------- | -------------------------- |
+| Fixed Window Counter   | No            | Low      | Low        | Simple APIs                |
+| Sliding Window Log     | Yes           | High     | High       | Accurate request tracking  |
+| Sliding Window Counter | Yes           | Medium   | Medium     | Balanced performance       |
+| Token Bucket           | Yes           | Medium   | Low        | APIs with burst allowance  |
+| Leaky Bucket           | No            | High     | Low        | Consistent processing rate |
+
+---
+
+## Notes
+
+- In distributed systems, use Redis or other shared storage for rate limit state
+- Consider using libraries like:
+  - express-rate-limit
+  - rate-limiter-flexible
+- External reverse proxies (like NGINX, Cloudflare, AWS API Gateway) also support built-in rate limiting

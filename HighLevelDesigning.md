@@ -701,3 +701,224 @@ function leakyBucketRateLimiter(req, res, next) {
   - express-rate-limit
   - rate-limiter-flexible
 - External reverse proxies (like NGINX, Cloudflare, AWS API Gateway) also support built-in rate limiting
+
+# Database Sharding
+
+Database sharding is a database partitioning technique used to split large databases into smaller, faster, and more manageable parts called **shards**.
+Each shard is an independent database that contains a subset of the data.
+
+---
+
+## Why Use Sharding?
+
+- To handle large volumes of data.
+- To improve write and read performance.
+- To reduce latency and load on a single database server.
+- To enable horizontal scaling by adding more machines instead of upgrading a single server.
+
+---
+
+## How Sharding Works
+
+1. Choose a **sharding key** (for example, `user_id`).
+2. Based on this key, route the data to a specific shard.
+3. Each shard stores only a portion of the full dataset.
+
+---
+
+## Example
+
+Consider a `users` table with millions of rows. You decide to shard it based on `user_id`.
+
+| user_id     | Shard   |
+| ----------- | ------- |
+| 1 - 1000    | Shard A |
+| 1001 - 2000 | Shard B |
+| 2001+       | Shard C |
+
+Each shard contains only a specific range (or hash) of user data and operates independently.
+
+---
+
+## Benefits
+
+- **Scalability**: Add more shards as the data grows.
+- **Performance**: Each shard holds less data, so queries run faster.
+- **Isolation**: Failures in one shard do not affect the others.
+
+---
+
+## Challenges
+
+- Queries spanning multiple shards become more complex.
+- Cross-shard joins are difficult or inefficient.
+- Rebalancing shards is challenging when data grows unevenly.
+
+## Sharding Strategies
+
+### Hash-Based Sharding
+
+- A hash function is applied to the sharding key (e.g., user_id).
+- The result of the hash decides which shard the data goes to.
+
+**Example**
+Suppose you have 3 shards:
+
+```js
+shard_number = hash(user_id) % 3;
+```
+
+| user_id | hash(user_id) | shard_number | Shard   |
+| ------- | ------------- | ------------ | ------- |
+| 1001    | 3487234       | 1            | Shard 1 |
+| 1002    | 9872398       | 2            | Shard 2 |
+| 1003    | 1122334       | 0            | Shard 0 |
+
+So the data is uniformly distributed across all shards based on the hash result.
+
+#### Pros
+
+- Uniform data distribution across shards.
+- Prevents hotspots, since distribution is randomized.
+
+#### Cons
+
+- Range queries (e.g., `user_id BETWEEN 1000 AND 2000`) are inefficient.
+- Resharding (adding/removing shards) is complex because the hash function's output changes.
+
+---
+
+### Range-Based Sharding
+
+#### How It Works
+
+- The sharding key is divided into predefined ranges.
+- Each shard is assigned a specific range of values.
+
+#### Example
+
+| Shard   | user_id Range   |
+| ------- | --------------- |
+| Shard A | 1 - 100000      |
+| Shard B | 100001 - 200000 |
+| Shard C | 200001 - 300000 |
+
+If `user_id = 150000`, the data goes to **Shard B**.
+
+#### Pros
+
+- Simple and efficient for range queries.
+- Easy to implement and understand.
+
+#### Cons
+
+- Can lead to uneven data distribution (hotspots).
+- Requires manual rebalancing if one shard grows faster than others.
+
+---
+
+### Comparison Summary
+
+| Strategy             | Data Distribution    | Range Queries | Uniform Load   | Resharding Complexity  |
+| -------------------- | -------------------- | ------------- | -------------- | ---------------------- |
+| Hash-Based Sharding  | Based on hash(key)   | No            | Yes            | High                   |
+| Range-Based Sharding | Based on value range | Yes           | Not guaranteed | Medium (manual effort) |
+
+---
+
+## Database Replication
+
+Replication is the process of applying data from one database server(**master**) to one or more servers(**replica**)
+
+# Database Replication
+
+## What is Database Replication?
+
+Database replication is the process of copying data from one database server (source) to one or more other servers (replicas).
+
+The goal is to ensure that the same data exists across multiple database instances, improving read performance, redundancy, and availability.
+
+---
+
+## Why Use Replication?
+
+- **High Availability**: Ensures the system remains operational even if one database server fails.
+- **Read Scalability**: Read queries can be distributed across replicas to balance the load.
+- **Disaster Recovery**: Replicas can act as backup copies.
+- **Geo-Distribution**: Replicas can be deployed in different regions to reduce latency for global users.
+
+---
+
+## Types of Replication
+
+### 1. Master-Slave Replication (Primary-Secondary)
+
+#### How It Works
+
+- The **master** (also called **primary**) handles all **write** operations.
+- The **slaves** (also called **secondaries**) replicate data from the master and are used for **read-only** operations.
+
+#### Pros
+
+- Writes and reads are separated.
+- Read performance improves due to distribution across slaves.
+
+#### Cons
+
+- Only one write node (the master) becomes a bottleneck.
+- Replication lag may lead to inconsistent reads.
+- Requires manual or automated failover if the master fails.
+
+---
+
+### 2. Read Replicas
+
+#### How It Works
+
+- A type of master-slave setup.
+- Read replicas replicate data from the primary and are used solely for read queries.
+- Popular in cloud-based databases like AWS RDS.
+
+#### Example Use Case
+
+- Master handles inserts and updates.
+- Read replicas serve analytics dashboards or high-throughput API reads.
+
+#### Pros
+
+- Easy to scale reads horizontally.
+- Simple to set up in managed cloud services.
+
+#### Cons
+
+- Writes still go through the primary.
+- Replication lag can affect real-time consistency.
+
+---
+
+### 3. Multi-Master Replication
+
+#### How It Works
+
+- Multiple database nodes can accept both **read and write** operations.
+- Each node replicates changes to the others.
+
+#### Pros
+
+- Higher availability and fault tolerance.
+- No single point of failure for writes.
+
+#### Cons
+
+- Requires conflict detection and resolution.
+- Harder to maintain strong consistency.
+
+---
+
+## Comparison Table
+
+| Replication Type | Write Support | Read Scalability | Conflict Handling | Common Use Case              |
+| ---------------- | ------------- | ---------------- | ----------------- | ---------------------------- |
+| Master-Slave     | Only Master   | Yes              | Not Required      | General-purpose applications |
+| Read Replicas    | Only Master   | Yes              | Not Required      | Read-heavy workloads         |
+| Multi-Master     | All Nodes     | Yes              | Required          | Distributed systems          |

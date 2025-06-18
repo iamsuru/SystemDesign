@@ -1028,3 +1028,399 @@ Helps absorb large traffic spikes (e.g., DDoS mitigation)
 - Cloudflare, Akamai, Amazon CloudFront, Fastly, Google Cloud CDN
 
 ---
+
+## Message Queue
+
+A Message Queue is a system that lets services communicate asynchronously. One service (producer) sends a message, and another (consumer) processes it later, allowing loose coupling and fault tolerance.
+
+- Producer can produce a message to queue even when the consumer is available.
+- Consumer can consume the message from queue even when the producer is unavailable.
+
+### RabbitMQ
+
+- RabbitMQ is an open-source message broker that facilitates asynchronous communication between services.
+- It implements the Advanced Message Queuing Protocol (AMQP).
+- Producers send messages to exchanges, and exchanges route them to queues based on bindings and routing keys.
+- Commonly used in microservices architectures, event-driven systems, and task queues.
+
+#### Message Brokers, Queues, Exchanges, Binding & Routing Keys
+
+**Message Broker**
+
+- A middleware that enables communication between different services.
+- Decouples producers and consumers.
+- Examples: RabbitMQ, Apache Kafka, Amazon SQS.
+
+**Queue**
+
+- A buffer that holds messages until they are processed.
+- FIFO (First In, First Out) behavior.
+- Consumers read messages from queues.
+
+**Exchange**
+
+- Accepts messages from producers.
+- Does not store messages, only routes them to queues based on rules (bindings).
+
+- Types: direct, fanout, topic, headers.
+
+**Binding**
+
+- A link between an exchange and a queue.
+- Defines rules for routing messages using binding keys.
+
+**Routing Key**
+
+- A label attached to a message by the producer.
+- Used by the exchange to decide which queue(s) to send the message to.
+
+#### Basic Producer Example
+
+```javascript
+const amqp = require("amqplib");
+
+async function producer() {
+  const conn = await amqp.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+  const queue = "basic_queue";
+
+  await ch.assertQueue(queue);
+  ch.sendToQueue(queue, Buffer.from("Hello World"));
+
+  console.log("Message sent");
+  await ch.close();
+  await conn.close();
+}
+
+producer();
+```
+
+#### Basic consumer example
+
+```javascript
+const amqp = require("amqplib");
+
+async function consumer() {
+  const conn = await amqp.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+  const queue = "basic_queue";
+
+  await ch.assertQueue(queue);
+  ch.consume(queue, (msg) => {
+    console.log("Received:", msg.content.toString());
+    ch.ack(msg);
+  });
+}
+
+consumer();
+```
+
+## Types of Exchanges
+
+RabbitMQ supports four types of exchanges: Direct, Fanout, Topic, and Headers.
+
+## Direct
+
+A **Direct Exchange** in RabbitMQ routes messages to queues based on an **exact match** between the message’s **routing key** and the queue’s **binding key**.
+
+### How It Works
+
+1. A direct exchange is declared.
+2. One or more queues are bound to it using specific binding keys.
+3. When a message is published with a routing key, it is routed to all queues bound with that exact key.
+
+### Use Case
+
+Use direct exchange when you want to route messages into different queues based on precise identifiers — for example, logging levels like `info`, `warn`, and `error`.
+
+### Example Scenario
+
+- **Exchange**: `logs_direct` (type `direct`)
+- **Queues**:
+  - `info_queue` with binding key `info`
+  - `error_queue` with binding key `error`
+- **Message**: Routing key = `info`
+
+Message is delivered to `info_queue` only.
+
+### Producer
+
+```javascript
+const amqp = require("amqplib");
+
+async function directProducer() {
+  const conn = await amqp.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  const exchange = "logs_direct";
+  const routingKey = "info";
+  const msg = "This is an info log";
+
+  await ch.assertExchange(exchange, "direct", { durable: false });
+  ch.publish(exchange, routingKey, Buffer.from(msg));
+
+  console.log("Sent:", msg);
+  await ch.close();
+  await conn.close();
+}
+
+directProducer();
+```
+
+### consumer
+
+```javascript
+const amqp = require("amqplib");
+
+async function directConsumer() {
+  const conn = await amqp.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  const exchange = "logs_direct";
+  const queue = "info_queue";
+  const routingKey = "info";
+
+  await ch.assertExchange(exchange, "direct", { durable: false });
+  await ch.assertQueue(queue);
+  await ch.bindQueue(queue, exchange, routingKey);
+
+  console.log("Waiting for messages...");
+  ch.consume(queue, (msg) => {
+    if (msg) {
+      console.log("Received:", msg.content.toString());
+      ch.ack(msg);
+    }
+  });
+}
+
+directConsumer();
+```
+
+## Fanout Exchange
+
+A **Fanout Exchange** routes messages to **all** queues that are bound to it, **regardless of the routing key**. It's used when you want to broadcast a message to multiple consumers.
+
+### How It Works
+
+1. A fanout exchange is declared.
+2. Multiple queues are bound to this exchange (binding key is ignored).
+3. When a message is published to the exchange, **all bound queues** receive the message.
+
+### Use Case
+
+Used when all consumers need to receive the same message — for example, broadcasting notifications or events to multiple services.
+
+### Example Scenario
+
+- **Exchange**: `logs_fanout` (type `fanout`)
+- **Queues**:
+  - `queue_1`
+  - `queue_2`
+- **Message**: Routing key = ignored
+
+Message is delivered to **both** `queue_1` and `queue_2`.
+
+### Producer
+
+```javascript
+const amqp = require("amqplib");
+
+async function fanoutProducer() {
+  const conn = await amqp.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  const exchange = "logs_fanout";
+  const msg = "Broadcast message to all queues";
+
+  await ch.assertExchange(exchange, "fanout", { durable: false });
+  ch.publish(exchange, "", Buffer.from(msg)); // Routing key is ignored
+
+  console.log("Sent:", msg);
+  await ch.close();
+  await conn.close();
+}
+
+fanoutProducer();
+```
+
+```javascript
+const amqp = require("amqplib");
+
+async function fanoutConsumer() {
+  const conn = await amqp.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  const exchange = "logs_fanout";
+
+  await ch.assertExchange(exchange, "fanout", { durable: false });
+  const q = await ch.assertQueue("", { exclusive: true });
+  await ch.bindQueue(q.queue, exchange, "");
+
+  console.log("Waiting for messages...");
+  ch.consume(q.queue, (msg) => {
+    if (msg) {
+      console.log("Received:", msg.content.toString());
+      ch.ack(msg);
+    }
+  });
+}
+
+fanoutConsumer();
+```
+
+## Topic Exchange
+
+A **Topic Exchange** routes messages based on **pattern matching** in the routing key using wildcards:
+
+- `*` matches exactly one word.
+- `#` matches zero or more words.
+
+### How It Works
+
+1. A topic exchange is declared.
+2. Queues are bound to the exchange with pattern-based routing keys.
+3. Messages are routed to queues whose binding key **matches the pattern**.
+
+### Use Case
+
+Used when routing needs to be flexible and topic-based — for example, in a pub/sub system with categories like `user.created.in`, `user.updated.us`.
+
+### Example Scenario
+
+- **Exchange**: `topic_logs` (type `topic`)
+- **Queues**:
+  - `india_queue` bound with `user.*.india`
+- **Message**: Routing key = `user.created.india`
+
+Message is delivered to `india_queue`.
+
+### Producer
+
+```javascript
+const amqp = require("amqplib");
+
+async function topicProducer() {
+  const conn = await amqp.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  const exchange = "topic_logs";
+  const routingKey = "user.created.india";
+  const msg = "User created in India";
+
+  await ch.assertExchange(exchange, "topic", { durable: false });
+  ch.publish(exchange, routingKey, Buffer.from(msg));
+
+  console.log("Sent:", msg);
+  await ch.close();
+  await conn.close();
+}
+
+topicProducer();
+```
+
+```javascript
+const amqp = require("amqplib");
+
+async function topicConsumer() {
+  const conn = await amqp.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  const exchange = "topic_logs";
+  const bindingKey = "user.*.india";
+
+  await ch.assertExchange(exchange, "topic", { durable: false });
+  const q = await ch.assertQueue("", { exclusive: true });
+  await ch.bindQueue(q.queue, exchange, bindingKey);
+
+  console.log("Waiting for messages...");
+  ch.consume(q.queue, (msg) => {
+    if (msg) {
+      console.log("Received:", msg.content.toString());
+      ch.ack(msg);
+    }
+  });
+}
+
+topicConsumer();
+```
+
+## Header Exchange
+
+A **Header Exchange** routes messages based on the **headers** of the message, not the routing key. You can specify `x-match: "any"` or `x-match: "all"` to control matching logic.
+
+### How It Works
+
+1. A headers exchange is declared.
+2. Queues are bound with headers and match conditions (`x-match`).
+3. Messages with matching headers are routed to the corresponding queues.
+
+### Use Case
+
+Useful when routing decisions depend on **multiple attributes**, not just a single routing key — e.g., region and type.
+
+### Example Scenario
+
+- **Exchange**: `headers_logs` (type `headers`)
+- **Queues**:
+  - `in_notif_queue` bound with headers `region=IN` and `type=notification`, with `x-match: all`
+- **Message**: Headers match those values
+
+Message is delivered to `in_notif_queue`.
+
+### Producer
+
+```javascript
+const amqp = require("amqplib");
+
+async function headersProducer() {
+  const conn = await amqp.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  const exchange = "headers_logs";
+  const msg = "Header-based message";
+
+  await ch.assertExchange(exchange, "headers", { durable: false });
+  ch.publish(exchange, "", Buffer.from(msg), {
+    headers: {
+      region: "IN",
+      type: "notification",
+    },
+  });
+
+  console.log("Sent:", msg);
+  await ch.close();
+  await conn.close();
+}
+
+headersProducer();
+```
+
+```javascript
+const amqp = require("amqplib");
+
+async function headersConsumer() {
+  const conn = await amqp.connect("amqp://localhost");
+  const ch = await conn.createChannel();
+
+  const exchange = "headers_logs";
+
+  await ch.assertExchange(exchange, "headers", { durable: false });
+  const q = await ch.assertQueue("", { exclusive: true });
+
+  await ch.bindQueue(q.queue, exchange, "", {
+    "x-match": "all",
+    region: "IN",
+    type: "notification",
+  });
+
+  console.log("Waiting for messages...");
+  ch.consume(q.queue, (msg) => {
+    if (msg) {
+      console.log("Received:", msg.content.toString());
+      ch.ack(msg);
+    }
+  });
+}
+
+headersConsumer();
+```
